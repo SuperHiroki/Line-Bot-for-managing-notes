@@ -1,0 +1,288 @@
+function doPost(e) {
+
+  // Lineからのリクエストを取得
+  var request_hiroki = JSON.parse(e.postData.contents);
+
+  // LineからuserIdを取得
+  var userId = JSON.parse(e.postData.contents).events[0].source.userId;
+  debug('userId: '+userId)
+
+  // LineからuserNameを取得
+  var profileEndpoint = 'https://api.line.me/v2/bot/profile/' + userId;
+  var headers = {
+    'Authorization': 'Bearer ' + 'BglJOB+9TL16n8YnJuJH/c3sij+jqHB58KWkTqIZg/6nG0NXoJpi9o9DWL4EJySxRjftOJc6BDv2qZ+LncTe6HXlnmpvmIuuJJIAoquddB+8SxwnWFx0ZvKGKKHS6d5NLlkyT1Tsduwh+1NHLdWgdQdB04t89/1O/w1cDnyilFU=',
+  };
+  var options = {
+    'headers': headers,
+    'method' : 'get'
+  };
+  var response = UrlFetchApp.fetch(profileEndpoint, options);
+  var userName = JSON.parse(response.getContentText()).displayName;
+  debug('userName: '+userName)
+
+  //appId
+  var appId=15;
+
+  //初めての会話かどうか。1は今回が初めての会話であることを示す。
+  var firstFlag=0;
+
+  //conversationBefore、conversationBeforeRecordNumberを取得。
+  var conversationBefore='aaa';
+  var conversationBeforeRecordNumber=1000000;
+  var data=getAllDatabase_memo(appId, userId, conversationBeforeDummy=1);
+  if(data.records.length==0){
+    firstFlag=1;
+  }
+  else{
+    firstFlag=0;
+    conversationBefore=((data.records[0])["comment"]).value;
+    debug('conversationBefore: '+conversationBefore);
+    conversationBeforeRecordNumber=((data.records[0])["レコード番号"]).value;
+    debug('conversationBeforeRecordNumber: '+conversationBeforeRecordNumber);
+  }
+  debug('firstFlag' +firstFlag);
+
+  // メッセージイベントであるか確認
+  if (request_hiroki.events[0].type == "message") {
+    // ユーザからのメッセージを取得
+    var message_hiroki = request_hiroki.events[0].message.text;
+    
+    // 応答メッセージを作成
+    var replyMessage = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    if (message_hiroki == "コマンド") {
+      replyMessage = "・メモ一覧\n・メモ追加\n・メモ削除";
+    } else {
+      replyMessage = "何を言っているのかわからない!\nコマンドは下記です。\n\n・メモ一覧\n・メモ追加\n・メモ削除";
+    }
+
+    // メモ一覧を表示
+    if (message_hiroki == "メモ一覧") {
+      replyMessage=memoListShow(appId, userId, conversationBeforeDummy=0);
+    }
+
+    // メモ追加
+    if (message_hiroki == "メモ追加") {
+      replyMessage="メモを書いてください";
+    }
+    if (conversationBefore=="メモ追加"){
+      postDatabaseInformation(appId, userId, userName, message_hiroki, conversationBeforeDummy=0);
+      replyMessage = "メモを追加したぜ!";
+    }
+
+    // メモ削除
+    if (message_hiroki == "メモ削除") {
+      replyMessage=memoListShow(appId, userId, conversationBeforeDummy=0);
+      replyMessage=replyMessage + "\n\n*****何番のメモを削除しますか？（半角空白を入れれば同時に複数削除できる） or 間違えた*****";
+    }
+    if (conversationBefore=="メモ削除"){
+      var pattern = /^[0-9][0-9\s]*[0-9]$/;
+      var pattern2 = /^[0-9]$/;
+      if(message_hiroki=="間違えた"){
+        replyMessage="メモ削除をキャンセルします";
+      }
+      else if (pattern.test(message_hiroki)==false && pattern2.test(message_hiroki)==false) {
+        replyMessage="数字を入力しろや";
+        replyToLine(request_hiroki.events[0].replyToken, replyMessage);
+        return;
+      }
+      else{
+        data=getAllDatabase_memo(appId, userId, conversationBeforeDummy=0)
+        var recordNumbers = data.records.map(function(record) {
+          return parseInt(record.レコード番号.value);
+        });
+        delete_list = message_hiroki.split(" ").map(Number);
+        if(delete_list.every(item => recordNumbers.includes(item))==true){
+          deleteRecordsFromKintone(appId, delete_list);
+          replyMessage = "メモを削除したぜ!";
+        }
+        else{
+          replyMessage = "存在しないレコード番号が含まれています。";
+          replyToLine(request_hiroki.events[0].replyToken, replyMessage);
+          return;
+        }
+      }
+    }
+
+
+    // Lineに応答を返す
+    replyToLine(request_hiroki.events[0].replyToken, replyMessage);
+
+    // conversationBeforeDummyが1になっているレコードのcommentをput。// 初回の場合は、conversationBeforeDummyを0にしてpost
+    if(firstFlag==1){
+      postDatabaseInformation(appId, userId, userName, message_hiroki, conversationBeforeDummy=1);
+    }
+    else{
+      updateRecordOneInKintone(appId, conversationBeforeRecordNumber, message_hiroki);
+    }
+  }
+}
+
+
+
+//返信
+function replyToLine(replyToken_hiroki, message_hiroki) {
+  var lineUrl = "https://api.line.me/v2/bot/message/reply";
+  var lineAccessToken = "BglJOB+9TL16n8YnJuJH/c3sij+jqHB58KWkTqIZg/6nG0NXoJpi9o9DWL4EJySxRjftOJc6BDv2qZ+LncTe6HXlnmpvmIuuJJIAoquddB+8SxwnWFx0ZvKGKKHS6d5NLlkyT1Tsduwh+1NHLdWgdQdB04t89/1O/w1cDnyilFU="; // 自分のLine Botのアクセストークンに置き換え
+  var headers_hiroki = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + lineAccessToken
+  };
+  var payload_hiroki = {
+    replyToken: replyToken_hiroki,
+    messages: [
+      {
+        type: "text",
+        text: message_hiroki
+      }
+    ]
+  };
+  var options = {
+    method: "post",
+    headers: headers_hiroki,
+    payload: JSON.stringify(payload_hiroki)
+  };
+  UrlFetchApp.fetch(lineUrl, options);
+}
+
+
+
+//メモ一覧表示
+function memoListShow(appId, userId, conversationBeforeDummy=0){
+  var data=getAllDatabase_memo(appId, userId, conversationBeforeDummy = conversationBeforeDummy);
+  var replyMessage="メモ一覧";
+  for (var i = 0; i < data.records.length; i++) {
+    var record = data.records[i];
+    replyMessage = replyMessage + "\n"+ record["レコード番号"].value +" / "+ record["datetime"].value +" / "+ record["comment"].value ;
+  }
+  return replyMessage
+}
+
+
+
+//kintone（コメント用データベース）にPOST
+function postDatabaseInformation(appId, userId, userName, message_for_comment, conversationBeforeDummy=0) {
+  var url = "https://9fc4t5g74iug.cybozu.com/k/v1/records.json";
+  var recordData = {
+    "app": appId,
+    "records": [
+      {
+        "datetime": {
+          "value": new Date()
+        },
+        "userId": {
+          "value": userId
+        },
+        "userName": {
+          "value": userName
+        },
+        "comment": {
+          "value": message_for_comment
+        },
+        "conversationBeforeDummy": {
+          "value": conversationBeforeDummy
+        }
+      }
+    ]
+  };
+  var options = {
+    headers : {
+      "X-Cybozu-API-Token": "4T7kNFSFfGFNkwqFKlcncniFNCun72qljk27w8oy",
+      "Content-Type": "application/json"
+    },
+    method : "post",
+    payload : JSON.stringify(recordData)
+  };
+  try {var response = UrlFetchApp.fetch(url, options);} catch (e) {debug(e); }
+}
+
+
+//kintone（コメント用データベース）からGET 
+function getAllDatabase_memo(appId, userId, conversationBeforeDummy=0) {
+  var query = 'userId in ("' + userId + '") and conversationBeforeDummy = ' + conversationBeforeDummy;
+  var url = 'https://9fc4t5g74iug.cybozu.com/k/v1/records.json?app=' + appId + '&query=' + encodeURIComponent(query);
+  var options = {
+    headers : {
+      "X-Cybozu-API-Token": "4T7kNFSFfGFNkwqFKlcncniFNCun72qljk27w8oy"
+    },
+    method : "get"
+  };
+  try{var response = UrlFetchApp.fetch(url, options);}catch(e){debug(e)};
+  var data = JSON.parse(response.getContentText());       //{records=[Ljava.lang.Object;@553a20c0, totalCount=null}debugするとこうなる。これはおかしくない。最初、ここでエラーが起きていると思ってしまった。
+  return data
+}
+
+
+
+//kintone（コメント用データベース）からレコード番号recordId番の"comment"フィールドの値をGET。
+function getRecordOneFromKintone(appId, recordId) {
+  var url = 'https://9fc4t5g74iug.cybozu.com/k/v1/record.json?app=' + appId + '&id=' + recordId;
+  var options = {
+    'method' : 'get',
+    'headers': {
+      'X-Cybozu-API-Token': '4T7kNFSFfGFNkwqFKlcncniFNCun72qljk27w8oy'
+    },
+  }
+  try{var response = UrlFetchApp.fetch(url, options);}catch(e){debug(e)};
+  var data = JSON.parse(response.getContentText());
+  return ((data.record)["comment"]).value;
+}
+
+
+
+//kintone（コメント用データベース）レコードについて、レコード番号を指定してcommentフィールドをput。
+function updateRecordOneInKintone(appId, recordId, message_hiroki) {
+  var url = 'https://9fc4t5g74iug.cybozu.com/k/v1/record.json';
+  var options = {
+    'method' : 'put',
+    'headers': {
+      'X-Cybozu-API-Token': '4T7kNFSFfGFNkwqFKlcncniFNCun72qljk27w8oy',
+      'Content-Type': 'application/json'
+    },
+    'payload' : JSON.stringify({
+      'app': appId,
+      'id': recordId,
+      'record': {
+        'comment': {
+          'value': message_hiroki
+        }
+      }
+    })
+  };
+  try{var response = UrlFetchApp.fetch(url, options);}catch(e){debug(e)};
+}
+
+
+
+//kintone（コメント用データベース）から特定のレコードを複数delete
+function deleteRecordsFromKintone(appId, recordIds) {
+  var url = 'https://9fc4t5g74iug.cybozu.com/k/v1/records.json';
+  var options = {
+    'method' : 'delete',
+    'headers': {
+      'X-Cybozu-API-Token': '4T7kNFSFfGFNkwqFKlcncniFNCun72qljk27w8oy',
+      'Content-Type': 'application/json'
+    },
+    'payload' : JSON.stringify({
+      'app': appId,
+      'ids': recordIds
+    })
+  };
+  try{var response = UrlFetchApp.fetch(url, options);}catch(e){debug(e)};
+}
+
+
+
+//debug
+function debug(value="debug_test_hiroki") {
+  const sheet = SpreadsheetApp.openById("1NDsI8ibuRjR8AsXMMu_XybaduOO052uD9v5v2AcHWes");
+  const ss = sheet.getSheetByName('sheet1');
+  const date = new Date();
+  const targetRow = ss.getLastRow() + 1;
+  ss.getRange('A' + targetRow).setValue(date);
+  ss.getRange('B' + targetRow).setValue(value);
+}
+
+
+
+
+  
